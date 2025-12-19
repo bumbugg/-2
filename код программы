@@ -9,13 +9,13 @@ kl = (ratio_2l_lambda / 2) * 2 * np.pi  # kl = 1.2 * pi
 # --- Аналитический расчет ---
 def field_pattern(theta):
     """Характеристика направленности по полю"""
-    # Use a small epsilon to avoid division by zero for theta = 0 or theta = pi
-    if abs(theta) < 1e-9 or abs(theta - np.pi) < 1e-9 or abs(theta - 2*np.pi) < 1e-9:
+    # Защита от деления на 0 для sin(0), sin(pi), sin(2pi)
+    if np.isclose(np.sin(theta), 0, atol=1e-9):
         return 0
     return (np.cos(kl * np.cos(theta)) - np.cos(kl)) / np.sin(theta)
 
-# Находим максимум аналитической ДН для нормировки
-thetas_check = np.linspace(0.01, np.pi - 0.01, 1000)
+# Находим максимум для нормировки
+thetas_check = np.linspace(0, np.pi, 1000)
 f_vals = np.abs([field_pattern(t) for t in thetas_check])
 f_max = np.max(f_vals)
 
@@ -30,7 +30,7 @@ d_max_db = 10 * np.log10(d_max_linear)
 
 print(f"Аналитический КНД (Dmax): {d_max_linear:.3f} раз ({d_max_db:.2f} дБ)")
 
-# --- Чтение данных из файла  ---
+# --- Чтение данных из файла ---
 sim_theta_deg = []
 sim_d_linear = []
 
@@ -47,188 +47,63 @@ try:
                 if len(parts) >= 3:
                     try:
                         sim_theta_deg.append(float(parts[0]))
-                        # ВАЖНО: берем 3-й столбец как линейное значение
                         sim_d_linear.append(float(parts[2]))
                     except ValueError: continue
 except FileNotFoundError:
-    print("Ошибка: файл 'sosal.txt' не найден.")
+    print("Ошибка: файл не найден.")
 
-sim_theta_rad = np.radians(sim_theta_deg)
+# --- ПОДГОТОВКА ДАННЫХ НА 360 ГРАДУСОВ ---
+
+# 1. Аналитика: создаем массив от 0 до 360 градусов (строка 61)
+theta_deg_full = np.linspace(0, 360, 1000)
+theta_rad_full = np.radians(theta_deg_full)
+d_analytic_linear_full = np.array([d_max_linear * (F_norm(t)**2) for t in theta_rad_full])
+d_analytic_db_full = 10 * np.log10(np.clip(d_analytic_linear_full, 1e-6, None))
+
+# 2. Моделирование: зеркалим данные 0-180 в 180-360 (строки 67-69)
+sim_theta_deg = np.array(sim_theta_deg)
 sim_d_linear = np.array(sim_d_linear)
-# Переводим в дБ для соответствующих графиков
-sim_d_db = 10 * np.log10(np.clip(sim_d_linear, 1e-12, None))
 
-# --- Подготовка данных для графиков ---
-# Для декартовых графиков (0-180 градусов)
-theta_cartesian_plot = np.linspace(0, np.pi, 500)
-d_analytic_linear_cartesian = np.array([d_max_linear * (F_norm(t)**2) for t in theta_cartesian_plot])
-d_analytic_db_cartesian = 10 * np.log10(np.clip(d_analytic_linear_cartesian, 1e-6, None))
-
-# Для полярных графиков (0-360 градусов)
-theta_polar_plot_half = np.linspace(0, np.pi, 500)
-d_analytic_linear_half = np.array([d_max_linear * (F_norm(t)**2) for t in theta_polar_plot_half])
-d_analytic_db_half = 10 * np.log10(np.clip(d_analytic_linear_half, 1e-6, None))
-
-theta_polar_full = np.concatenate([theta_polar_plot_half, theta_polar_plot_half + np.pi])
-d_analytic_linear_full = np.concatenate([d_analytic_linear_half, d_analytic_linear_half])
-d_analytic_db_full = np.concatenate([d_analytic_db_half, d_analytic_db_half])
-
-sim_theta_rad_full = np.concatenate([sim_theta_rad, sim_theta_rad + np.pi])
-sim_d_linear_full = np.concatenate([sim_d_linear, sim_d_linear])
-sim_d_db_full = np.concatenate([sim_d_db, sim_d_db])
+sim_theta_deg_360 = np.concatenate([sim_theta_deg, sim_theta_deg + 180])
+sim_d_linear_360 = np.concatenate([sim_d_linear, sim_d_linear])
+sim_d_db_360 = 10 * np.log10(np.clip(sim_d_linear_360, 1e-12, None))
 
 # --- Построение графиков ---
 fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 plt.subplots_adjust(hspace=0.35, wspace=0.25)
 
-# 1. Декартова (разы)
-axs[0, 0].plot(np.degrees(theta_cartesian_plot), d_analytic_linear_cartesian, 'b-', label='Аналитика', linewidth=2)
-axs[0, 0].plot(sim_theta_deg, sim_d_linear, 'r--', label='Моделирование', alpha=0.8)
-axs[0, 0].set_title('КНД в разах (Декартова)')
+# 1. Декартова (разы) - изменено на 360
+axs[0, 0].plot(theta_deg_full, d_analytic_linear_full, 'b-', label='Аналитика', linewidth=2)
+axs[0, 0].plot(sim_theta_deg_360, sim_d_linear_360, 'r--', label='Моделирование', alpha=0.8)
+axs[0, 0].set_title('КНД в разах (Декартова 0-360°)')
 axs[0, 0].set_xlabel('Угол theta, град.')
+axs[0, 0].set_xlim([0, 360]) # Фиксация оси (строка 83)
 axs[0, 0].grid(True)
 axs[0, 0].legend()
 
-# 2. Декартова (дБ)
-axs[0, 1].plot(np.degrees(theta_cartesian_plot), d_analytic_db_cartesian, 'b-', label='Аналитика', linewidth=2)
-axs[0, 1].plot(sim_theta_deg, sim_d_db, 'r--', label='Моделирование', alpha=0.8)
-axs[0, 1].set_title('КНД в дБ (Декартова)')
-axs[0, 1].set_ylim([-25, np.max(d_analytic_db_cartesian) + 5]) # Настраиваем масштаб для наглядности
+# 2. Декартова (дБ) - изменено на 360
+axs[0, 1].plot(theta_deg_full, d_analytic_db_full, 'b-', label='Аналитика', linewidth=2)
+axs[0, 1].plot(sim_theta_deg_360, sim_d_db_360, 'r--', label='Моделирование', alpha=0.8)
+axs[0, 1].set_title('КНД в дБ (Декартова 0-360°)')
 axs[0, 1].set_xlabel('Угол theta, град.')
+axs[0, 1].set_xlim([0, 360]) # Фиксация оси (строка 92)
+axs[0, 1].set_ylim([-25, np.max(d_analytic_db_full) + 5])
 axs[0, 1].grid(True)
 axs[0, 1].legend()
 
 # 3. Полярная (разы)
 ax_pol1 = plt.subplot(2, 2, 3, projection='polar')
-ax_pol1.plot(theta_polar_full, d_analytic_linear_full, 'b-', linewidth=2)
-ax_pol1.plot(sim_theta_rad_full, sim_d_linear_full, 'r--', alpha=0.8)
+ax_pol1.plot(theta_rad_full, d_analytic_linear_full, 'b-', linewidth=2)
+ax_pol1.plot(np.radians(sim_theta_deg_360), sim_d_linear_360, 'r--', alpha=0.8)
 ax_pol1.set_theta_zero_location('N')
 ax_pol1.set_theta_direction(-1)
 ax_pol1.set_title('КНД в разах (Полярная)', pad=20)
 
 # 4. Полярная (дБ)
 ax_pol2 = plt.subplot(2, 2, 4, projection='polar')
-offset = 40  # Смещение для отображения дБ
-ax_pol2.plot(theta_polar_full, d_analytic_db_full + offset, 'b-', label='Аналитика', linewidth=2)
-ax_pol2.plot(sim_theta_rad_full, sim_d_db_full + offset, 'r--', label='Моделирование', alpha=0.8)
-ax_pol2.set_theta_zero_location('N')
-ax_pol2.set_theta_direction(-1)
-ax_pol2.set_yticklabels([])
-ax_pol2.set_title(f'КНД в дБ (Полярная, смещение +{offset} дБ)', pad=20)
-
-plt.show()import numpy as np
-import matplotlib.pyplot as plt
-from scipy.integrate import quad
-
-# Параметры Варианта 8
-ratio_2l_lambda = 1.2
-kl = (ratio_2l_lambda / 2) * 2 * np.pi  # kl = 1.2 * pi
-
-# --- Аналитический расчет ---
-def field_pattern(theta):
-    """Характеристика направленности по полю"""
-    # Use a small epsilon to avoid division by zero for theta = 0 or theta = pi
-    if abs(theta) < 1e-9 or abs(theta - np.pi) < 1e-9 or abs(theta - 2*np.pi) < 1e-9:
-        return 0
-    return (np.cos(kl * np.cos(theta)) - np.cos(kl)) / np.sin(theta)
-
-# Находим максимум аналитической ДН для нормировки
-thetas_check = np.linspace(0.01, np.pi - 0.01, 1000)
-f_vals = np.abs([field_pattern(t) for t in thetas_check])
-f_max = np.max(f_vals)
-
-def F_norm(theta):
-    """Нормированная ДН по полю"""
-    return np.abs(field_pattern(theta)) / f_max
-
-# Расчет Dmax через интеграл
-integral, _ = quad(lambda t: (F_norm(t)**2) * np.sin(t), 0, np.pi)
-d_max_linear = 2 / integral
-d_max_db = 10 * np.log10(d_max_linear)
-
-print(f"Аналитический КНД (Dmax): {d_max_linear:.3f} раз ({d_max_db:.2f} дБ)")
-
-# --- Чтение данных из файла 'sosal.txt' ---
-sim_theta_deg = []
-sim_d_linear = []
-
-try:
-    with open('расчётные_данные_ver2.txt', 'r') as f:
-        lines = f.readlines()
-        data_started = False
-        for line in lines:
-            if '---' in line:
-                data_started = True
-                continue
-            if data_started and line.strip():
-                parts = line.split()
-                if len(parts) >= 3:
-                    try:
-                        sim_theta_deg.append(float(parts[0]))
-                        # ВАЖНО: берем 3-й столбец как линейное значение
-                        sim_d_linear.append(float(parts[2]))
-                    except ValueError: continue
-except FileNotFoundError:
-    print("Ошибка: файл 'sosal.txt' не найден.")
-
-sim_theta_rad = np.radians(sim_theta_deg)
-sim_d_linear = np.array(sim_d_linear)
-# Переводим в дБ для соответствующих графиков
-sim_d_db = 10 * np.log10(np.clip(sim_d_linear, 1e-12, None))
-
-# --- Подготовка данных для графиков ---
-# Для декартовых графиков (0-180 градусов)
-theta_cartesian_plot = np.linspace(0, np.pi, 500)
-d_analytic_linear_cartesian = np.array([d_max_linear * (F_norm(t)**2) for t in theta_cartesian_plot])
-d_analytic_db_cartesian = 10 * np.log10(np.clip(d_analytic_linear_cartesian, 1e-6, None))
-
-# Для полярных графиков (0-360 градусов)
-theta_polar_plot_half = np.linspace(0, np.pi, 500)
-d_analytic_linear_half = np.array([d_max_linear * (F_norm(t)**2) for t in theta_polar_plot_half])
-d_analytic_db_half = 10 * np.log10(np.clip(d_analytic_linear_half, 1e-6, None))
-
-theta_polar_full = np.concatenate([theta_polar_plot_half, theta_polar_plot_half + np.pi])
-d_analytic_linear_full = np.concatenate([d_analytic_linear_half, d_analytic_linear_half])
-d_analytic_db_full = np.concatenate([d_analytic_db_half, d_analytic_db_half])
-
-sim_theta_rad_full = np.concatenate([sim_theta_rad, sim_theta_rad + np.pi])
-sim_d_linear_full = np.concatenate([sim_d_linear, sim_d_linear])
-sim_d_db_full = np.concatenate([sim_d_db, sim_d_db])
-
-# --- Построение графиков ---
-fig, axs = plt.subplots(2, 2, figsize=(14, 10))
-plt.subplots_adjust(hspace=0.35, wspace=0.25)
-
-# 1. Декартова (разы)
-axs[0, 0].plot(np.degrees(theta_cartesian_plot), d_analytic_linear_cartesian, 'b-', label='Аналитика', linewidth=2)
-axs[0, 0].plot(sim_theta_deg, sim_d_linear, 'r--', label='Моделирование', alpha=0.8)
-axs[0, 0].set_title('КНД в разах (Декартова)')
-axs[0, 0].set_xlabel('Угол theta, град.')
-axs[0, 0].grid(True)
-axs[0, 0].legend()
-
-# 2. Декартова (дБ)
-axs[0, 1].plot(np.degrees(theta_cartesian_plot), d_analytic_db_cartesian, 'b-', label='Аналитика', linewidth=2)
-axs[0, 1].plot(sim_theta_deg, sim_d_db, 'r--', label='Моделирование', alpha=0.8)
-axs[0, 1].set_title('КНД в дБ (Декартова)')
-axs[0, 1].set_ylim([-25, np.max(d_analytic_db_cartesian) + 5]) # Настраиваем масштаб для наглядности
-axs[0, 1].set_xlabel('Угол theta, град.')
-axs[0, 1].grid(True)
-axs[0, 1].legend()
-
-# 3. Полярная (разы)
-ax_pol1 = plt.subplot(2, 2, 3, projection='polar')
-ax_pol1.plot(theta_polar_full, d_analytic_linear_full, 'b-', linewidth=2)
-ax_pol1.plot(sim_theta_rad_full, sim_d_linear_full, 'r--', alpha=0.8)
-ax_pol1.set_theta_zero_location('N')
-ax_pol1.set_theta_direction(-1)
-ax_pol1.set_title('КНД в разах (Полярная)', pad=20)
-
-# 4. Полярная (дБ)
-ax_pol2 = plt.subplot(2, 2, 4, projection='polar')
-offset = 40  # Смещение для отображения дБ
-ax_pol2.plot(theta_polar_full, d_analytic_db_full + offset, 'b-', label='Аналитика', linewidth=2)
-ax_pol2.plot(sim_theta_rad_full, sim_d_db_full + offset, 'r--', label='Моделирование', alpha=0.8)
+offset = 40
+ax_pol2.plot(theta_rad_full, d_analytic_db_full + offset, 'b-', label='Аналитика', linewidth=2)
+ax_pol2.plot(np.radians(sim_theta_deg_360), sim_d_db_360 + offset, 'r--', label='Моделирование', alpha=0.8)
 ax_pol2.set_theta_zero_location('N')
 ax_pol2.set_theta_direction(-1)
 ax_pol2.set_yticklabels([])
