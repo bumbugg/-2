@@ -30,7 +30,7 @@ d_max_db = 10 * np.log10(d_max_linear)
 
 print(f"Аналитический КНД (Dmax): {d_max_linear:.3f} раз ({d_max_db:.2f} дБ)")
 
-# --- Чтение данных из файла 'sosal.txt' ---
+# --- Чтение данных из файла  ---
 sim_theta_deg = []
 sim_d_linear = []
 
